@@ -1,0 +1,157 @@
+name: Linux Proxy Testbed
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: Runtime in minutes
+        required: false
+        default: "360"
+
+env:
+  NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+
+jobs:
+  proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Generate session info
+        shell: bash
+        run: |
+          id=$(uuidgen | cut -c1-6)
+          echo "PROXY_USER=ci_$id" >> $GITHUB_ENV
+          echo "PROXY_PASS=Pass123!!$((RANDOM % 9000 + 1000))" >> $GITHUB_ENV
+
+      - name: Install Tinyproxy
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tinyproxy
+
+      - name: Configure Tinyproxy
+        shell: bash
+        run: |
+          # Create a minimal configuration with basic authentication
+          sudo tee /etc/tinyproxy/tinyproxy.conf > /dev/null <<EOF
+          User tinyproxy
+          Group tinyproxy
+          Port 8888
+          Timeout 600
+          DefaultErrorFile "/usr/share/tinyproxy/default.html"
+          StatFile "/usr/share/tinyproxy/stats.html"
+          LogLevel Info
+          MaxClients 100
+          Allow 0.0.0.0/0
+          BasicAuth ${{ env.PROXY_USER }} ${{ env.PROXY_PASS }}
+          EOF
+
+      - name: Start Tinyproxy
+        shell: bash
+        run: |
+          sudo systemctl start tinyproxy
+          sudo systemctl status tinyproxy --no-pager
+          echo "Tinyproxy started on port 8888."
+
+      - name: Download ngrok
+        shell: bash
+        run: |
+          curl -sSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz \
+            -o /tmp/ngrok.tgz
+          tar -xzf /tmp/ngrok.tgz -C /usr/local/bin/
+
+      - name: Authenticate ngrok
+        shell: bash
+        run: |
+          ngrok config add-authtoken ${{ env.NGROK_AUTH_TOKEN }}
+
+      - name: Create ngrok TCP tunnel for proxy
+        shell: bash
+        run: |
+          # Start ngrok tunnel for the proxy port (8888)
+          nohup ngrok tcp 8888 > /tmp/ngrok.log 2>&1 &
+
+          # Wait for the ngrok API to be ready and retrieve the public URL
+          for i in {1..30}; do
+            sleep 2
+            tunnel=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="tcp") | .public_url' | head -n1)
+            if [[ -n "$tunnel" ]]; then
+              break
+            fi
+          done
+
+          if [[ -z "$tunnel" ]]; then
+            echo "ngrok TCP tunnel did not come up in time."
+            cat /tmp/ngrok.log
+            exit 1
+          fi
+
+          # public_url looks like tcp://0.tcp.ngrok.io:12345
+          addr_port=${tunnel#tcp://}
+          ngrok_host=$(echo $addr_port | cut -d: -f1)
+          ngrok_port=$(echo $addr_port | cut -d: -f2)
+
+          echo "NGROK_HOST=$ngrok_host" >> $GITHUB_ENV
+          echo "NGROK_PORT=$ngrok_port" >> $GITHUB_ENV
+
+          echo ""
+          echo "================================"
+          echo "PROXY READY (ngrok TCP)"
+          echo "Host: $ngrok_host"
+          echo "Port: $ngrok_port"
+          echo "USER: ${{ env.PROXY_USER }}"
+          echo "PASS: ${{ env.PROXY_PASS }}"
+          echo "================================"
+
+      - name: Notify Discord
+        shell: bash
+        env:
+          DISCORD_NOTIFY_SECRET: ${{ secrets.DISCORD_NOTIFY_SECRET }}
+        run: |
+          block="========================"$'\n'
+          block+="PROXY READY (ngrok)"$'\n'
+          block+="HOST: ${{ env.NGROK_HOST }}"$'\n'
+          block+="PORT: ${{ env.NGROK_PORT }}"$'\n'
+          block+="USER: ${{ env.PROXY_USER }}"$'\n'
+          block+="PASS: ${{ env.PROXY_PASS }}"$'\n'
+          block+="========================"$'\n'
+
+          payload=$(jq -n --arg content "$block" '{content: $content}')
+
+          curl -s -X POST \
+            -H "X-Notify-Secret: $DISCORD_NOTIFY_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            https://gordp-discord-bot.gordp-discord-bot.workers.dev/notify
+
+      - name: Validate proxy locally
+        shell: bash
+        run: |
+          # Test that the local proxy responds with authentication
+          test_url="http://example.com"
+          proxy="http://${{ env.PROXY_USER }}:${{ env.PROXY_PASS }}@127.0.0.1:8888"
+          response_code=$(curl -s -o /dev/null -w "%{http_code}" -x "$proxy" "$test_url" --max-time 10)
+          if [[ "$response_code" -eq 200 ]]; then
+            echo "Local proxy test passed (HTTP 200)."
+          else
+            echo "Proxy validation failed with status: $response_code"
+            exit 1
+          fi
+
+      - name: Keep alive
+        shell: bash
+        run: |
+          end_time=$(( $(date +%s) + 360 * 60 ))
+          while [[ $(date +%s) -lt $end_time ]]; do
+            echo "Alive: $(date)"
+            sleep 60
+          done
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          sudo systemctl stop tinyproxy || true
+          pkill -f ngrok || true
+          echo "Cleanup done."
