@@ -1,0 +1,9 @@
+{
+  "host": "0.tcp.ngrok.io",
+  "port": 13586,
+  "username": "ci_21be2e",
+  "password": "Pass123!!5808",
+  "url": "http://ci_21be2e:Pass123!!5808@0.tcp.ngrok.io:13586",
+  "created_at": "2026-11-20T21:17:46Z",
+  "run_id": "44818998513"
+}
