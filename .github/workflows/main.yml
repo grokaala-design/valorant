@@ -1,4 +1,4 @@
-name: Linux Proxy Testbed
+﻿name: Linux Proxy Testbed
 
 on:
   workflow_dispatch:
@@ -7,6 +7,9 @@ on:
         description: Runtime in minutes
         required: false
         default: "360"
+
+permissions:
+  contents: write
 
 env:
   NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
@@ -17,6 +20,9 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Generate session info
         shell: bash
         run: |
@@ -33,7 +39,6 @@ jobs:
       - name: Configure Tinyproxy
         shell: bash
         run: |
-          # Create a minimal configuration with basic authentication
           sudo tee /etc/tinyproxy/tinyproxy.conf > /dev/null <<EOF
           User tinyproxy
           Group tinyproxy
@@ -64,15 +69,13 @@ jobs:
       - name: Authenticate ngrok
         shell: bash
         run: |
-          ngrok config add-authtoken ${{ env.NGROK_AUTH_TOKEN }}
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
       - name: Create ngrok TCP tunnel for proxy
         shell: bash
         run: |
-          # Start ngrok tunnel for the proxy port (8888)
           nohup ngrok tcp 8888 > /tmp/ngrok.log 2>&1 &
 
-          # Wait for the ngrok API to be ready and retrieve the public URL
           for i in {1..30}; do
             sleep 2
             tunnel=$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="tcp") | .public_url' | head -n1)
@@ -87,7 +90,6 @@ jobs:
             exit 1
           fi
 
-          # public_url looks like tcp://0.tcp.ngrok.io:12345
           addr_port=${tunnel#tcp://}
           ngrok_host=$(echo $addr_port | cut -d: -f1)
           ngrok_port=$(echo $addr_port | cut -d: -f2)
@@ -103,6 +105,26 @@ jobs:
           echo "USER: ${{ env.PROXY_USER }}"
           echo "PASS: ${{ env.PROXY_PASS }}"
           echo "================================"
+
+      - name: Publish proxy to repository
+        shell: bash
+        run: |
+          cat > proxy.json <<EOF
+          {
+            "host": "${NGROK_HOST}",
+            "port": ${NGROK_PORT},
+            "username": "${PROXY_USER}",
+            "password": "${PROXY_PASS}",
+            "url": "http://${PROXY_USER}:${PROXY_PASS}@${NGROK_HOST}:${NGROK_PORT}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "run_id": "${GITHUB_RUN_ID}"
+          }
+          EOF
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add proxy.json
+          git commit -m "Update proxy [run ${GITHUB_RUN_ID}]" || echo "No changes"
+          git push
 
       - name: Notify Discord
         shell: bash
@@ -128,7 +150,6 @@ jobs:
       - name: Validate proxy locally
         shell: bash
         run: |
-          # Test that the local proxy responds with authentication
           test_url="http://example.com"
           proxy="http://${{ env.PROXY_USER }}:${{ env.PROXY_PASS }}@127.0.0.1:8888"
           response_code=$(curl -s -o /dev/null -w "%{http_code}" -x "$proxy" "$test_url" --max-time 10)
