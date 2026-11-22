@@ -1,9 +1,9 @@
 {
-  "host": "0.tcp.ngrok.io",
-  "port": 13586,
-  "username": "ci_54473e",
-  "password": "Pass123!!5232",
-  "url": "http://ci_54473e:Pass123!!5232@0.tcp.ngrok.io:13586",
-  "created_at": "2026-11-22T14:20:22Z",
-  "run_id": "45032249609"
+  "host": "8.tcp.us-cal-1.ngrok.io",
+  "port": 16623,
+  "username": "ci_bf1a62",
+  "password": "Pass123!!1450",
+  "url": "http://ci_bf1a62:Pass123!!1450@8.tcp.us-cal-1.ngrok.io:16623",
+  "created_at": "2026-11-22T14:27:26Z",
+  "run_id": "45032885884"
 }
