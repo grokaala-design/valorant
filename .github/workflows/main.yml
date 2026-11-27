@@ -1,4 +1,4 @@
-﻿name: Linux Proxy Testbed
+﻿﻿name: Linux Proxy Testbed
 
 on:
   workflow_dispatch:
@@ -126,26 +126,6 @@ jobs:
           git commit -m "Update proxy [run ${GITHUB_RUN_ID}]" || echo "No changes"
           git push
 
-      - name: Notify Discord
-        shell: bash
-        env:
-          DISCORD_NOTIFY_SECRET: ${{ secrets.DISCORD_NOTIFY_SECRET }}
-        run: |
-          block="========================"$'\n'
-          block+="PROXY READY (ngrok)"$'\n'
-          block+="HOST: ${{ env.NGROK_HOST }}"$'\n'
-          block+="PORT: ${{ env.NGROK_PORT }}"$'\n'
-          block+="USER: ${{ env.PROXY_USER }}"$'\n'
-          block+="PASS: ${{ env.PROXY_PASS }}"$'\n'
-          block+="========================"$'\n'
-
-          payload=$(jq -n --arg content "$block" '{content: $content}')
-
-          curl -s -X POST \
-            -H "X-Notify-Secret: $DISCORD_NOTIFY_SECRET" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            https://gordp-discord-bot.gordp-discord-bot.workers.dev/notify
 
       - name: Validate proxy locally
         shell: bash
@@ -176,3 +156,5 @@ jobs:
           sudo systemctl stop tinyproxy || true
           pkill -f ngrok || true
           echo "Cleanup done."
+
+
