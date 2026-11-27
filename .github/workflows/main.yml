@@ -1,4 +1,4 @@
-﻿﻿name: Linux Proxy Testbed
+name: Linux Proxy Testbed
 
 on:
   workflow_dispatch:
@@ -156,5 +156,6 @@ jobs:
           sudo systemctl stop tinyproxy || true
           pkill -f ngrok || true
           echo "Cleanup done."
+
 
 
